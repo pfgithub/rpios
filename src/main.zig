@@ -14,6 +14,7 @@ fn delay(count: i32) void {
         : [count] "0" (count)
         : "cc"
     );
+    // for(range(count)) asm volatile("nop") should be good enough
 }
 
 const mmio = struct {
@@ -58,6 +59,13 @@ const mmio = struct {
     const mbox_read = @ptrCast(*volatile u32, mbox_base + 0x00 / 4);
     const mbox_status = @ptrCast(*volatile u32, mbox_base + 0x18 / 4);
     const mbox_write = @ptrCast(*volatile u32, mbox_base + 0x20 / 4);
+
+    // Random numbers
+    const rng_base = gpio_base + 0x00104000 / 4;
+    const rng_ctrl = @ptrCast(*volatile u32, gpio_base + 0x00 / 4);
+    const rng_status = @ptrCast(*volatile u32, gpio_base + 0x04 / 4);
+    const rng_data = @ptrCast(*volatile u32, gpio_base + 0x08 / 4);
+    const rng_int_mask = @ptrCast(*volatile u32, gpio_base + 0x10 / 4);
 };
 
 const mbox = struct {
@@ -227,15 +235,13 @@ const uart = struct {
         mmio.uart0_cr.* = 0x00000000;
         // Setup the GPIO pin 14 && 15.
 
-        // Disable pull up/down for all GPIO pins & delay for 150 cycles.
+        // Disable pull up/down for all GPIO pins
+        // Disable pull up/down for pin 14,15
+        // Write
         mmio.gppud.* = 0x00000000;
         delay(150);
-
-        // Disable pull up/down for pin 14,15 & delay for 150 cycles.
         mmio.gppudclk0.* = (1 << 14) | (1 << 15);
         delay(150);
-
-        // Write 0 to GPPUDCLK0 to make it take effect.
         mmio.gppudclk0.* = 0x00000000;
 
         // Clear pending interrupts.
@@ -297,6 +303,18 @@ const uart = struct {
     }
     pub fn writer() Writer {
         return .{ .context = {} };
+    }
+};
+
+const rand = struct {
+    pub fn init() void {
+        mmio.rng_status.* = 0x40000;
+        mmio.rng_int_mask.* |= 1;
+        mmio.rng_ctrl.* |= 1;
+    }
+    pub fn rand() u32 {
+        while (mmio.rng_status.* >> 24 == 0) spinHint();
+        return mmio.rng_data.*;
     }
 };
 
