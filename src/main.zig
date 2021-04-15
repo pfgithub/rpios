@@ -289,7 +289,53 @@ const uart = struct {
     pub fn puts(str: []const u8) void {
         for (str) |char| putc(char);
     }
+    // const WriteError = error{Never};
+    // const Writer = std.io.Writer(void, WriteError, write);
+    // fn write(self: void, bytes: []const u8) WriteError!usize {
+    //     puts(bytes);
+    //     return bytes.len;
+    // }
+    // pub fn writer() Writer {
+    //     return .{ .context = {} };
+    // }
 };
+
+var log_location: union(enum) {
+    discard,
+    uart,
+} = .discard;
+
+pub fn log(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    switch (log_location) {
+        .discard => {},
+        .uart => {
+            const level_txt = switch (message_level) {
+                .emerg => "emergency",
+                .alert => "alert",
+                .crit => "critical",
+                .err => "error",
+                .warn => "warning",
+                .notice => "notice",
+                .info => "info",
+                .debug => "debug",
+            };
+            const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+            // const stderr = std.io.getStdErr().writer();
+            // const held = std.debug.getStderrMutex().acquire();
+            // defer held.release();
+            uart.writer().print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+        },
+    }
+}
+// alternatively:
+//     root.os.io.getStdErrHandle
+//     that returns a root.os.bits.fd_t
+// nah I think log is a better choice
 
 // // arguments for AArch64
 // void kernel_main(uint64_t dtb_ptr32, uint64_t x1, uint64_t x2, uint64_t x3)
@@ -299,6 +345,8 @@ const uart = struct {
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
+    // log_location = .uart;
+    // std.log.info("It works! This is the default web page for this web server!", .{});
 
     var b = mbox.Builder{};
     const board_serial = b.add(mbox.get_board_serial, .{});
