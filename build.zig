@@ -4,33 +4,16 @@ const Model = struct {
     target: std.zig.CrossTarget,
     machine: []const u8,
 };
-// comptimestringmap wasn't working because the cross target parse required too many branches
-const RaspiModel = enum {
-    raspi3,
-    raspi4,
-    pub fn value(rm: RaspiModel) Model {
-        return switch (rm) {
-            .raspi3 => .{
-                .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53" }) catch unreachable,
-                .machine = "raspi3",
-            },
-            .raspi4 => .{
-                .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a72" }) catch unreachable,
-                .machine = "error",
-            },
-        };
-    }
-};
 
 pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("kernel8.img", "src/main.zig");
 
-    const model = (b.option(RaspiModel, "model", "?") orelse {
-        std.debug.print("Expected -Dmodel=raspi3 | raspi4\n", .{});
-        @panic("error");
-    }).value();
+    const model: Model = .{
+        .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53" }) catch unreachable,
+        .machine = "raspi3",
+    };
 
     // zig build-exe -target aarch64-freestanding src/boot.s src/main.zig --script src/linkerscript.ld -femit-bin=zig-cache/bin/app
     // qemu-system-aarch64 -M raspi3 -serial stdio -kernel zig-cache/bin/kernel8.img
