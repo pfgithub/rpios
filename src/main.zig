@@ -60,13 +60,50 @@ const mmio = struct {
     const mbox_write = @ptrCast(*volatile u32, mbox_base + 0x20 / 4);
 };
 
-const mbox: *align(16) volatile [9]u32 = &(struct {
-    var mbox_raw: [9]u32 align(16) = [_]u32{ 9 * 4, 0, 0x38002, 12, 8, 2, 3000000, 0, 0 };
-}).mbox_raw;
+const mbox = struct {
+    const mbox_ptr: *align(0b1000) volatile [36]u32 = &(struct {
+        var mbox_raw: [36]u32 align(0b1000) = [_]u32{0} ** 36;
+    }).mbox_raw;
+    const MboxChannel = enum(u4) {
+        ch_power = 0,
+        ch_fb = 1,
+        ch_vuart = 2,
+        ch_vchiq = 3,
+        ch_leds = 4,
+        ch_btns = 5,
+        ch_touch = 6,
+        ch_count = 7,
+        ch_prop = 8,
+    };
+    const MBOX_FULL: u32 = 0x80000000;
+    const MBOX_RESPONSE: u32 = 0x80000000;
+    const MBOX_EMPTY: u32 = 0x40000000;
+
+    /// https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface#set-clock-rate
+    pub fn call(channel: MboxChannel, args: []const u32) bool {
+        mbox_ptr[0] = @intCast(u32, (args.len + 1) * 4);
+        for (args) |arg, i| mbox_ptr[i + 1] = arg;
+
+        if (@ptrToInt(mbox_ptr) & ~@as(usize, 0b111) != @ptrToInt(mbox_ptr)) @panic("misaligned mbox pointer. must be 0b1000 aligned");
+        const r = @intCast(u32, @ptrToInt(mbox_ptr)) | @enumToInt(channel); // if it's align(16), what's the point of & ~0xF?
+
+        // wait until we can talk to the VC
+        while (mmio.mbox_status.* & MBOX_FULL != 0) spinHint();
+        // send our message to property channel and wait for the response
+        mmio.mbox_write.* = r;
+
+        while (true) {
+            // wait for response
+            while (mmio.mbox_status.* & MBOX_EMPTY != 0) spinHint();
+
+            // if it is ours
+            if (mmio.mbox_read.* == r) return mbox_ptr[1] == MBOX_RESPONSE;
+        }
+    }
+};
 
 const uart = struct {
     pub fn init() void {
-        const mbox_r = @intCast(u32, (@ptrToInt(mbox) & ~@as(usize, 0xF)) | 8);
         // Disable UART0.
         mmio.uart0_cr.* = 0x00000000;
         // Setup the GPIO pin 14 && 15.
@@ -94,13 +131,18 @@ const uart = struct {
         // Set it to 3Mhz so that we can consistently set the baud rate
         switch (raspi) {
             .raspi3 => {
-                // UART_CLOCK = 30000000;
-                var r: u32 = mbox_r; // if it's align(16), what's the point of & ~0xF?
-                // wait until we can talk to the VC
-                while (mmio.mbox_status.* & 0x80000000 != 0) spinHint();
-                // send our message to property channel and wait for the response
-                mmio.mbox_write.* = r;
-                while ((mmio.mbox_status.* & 0x40000000) != 0 or mmio.mbox_read.* != r) spinHint();
+                if (!mbox.call(.ch_prop, &[_]u32{
+                    0, // MBOX_REQUEST
+                    0x38002, // MBOX_TAG_SETCLKRATE
+                    12,
+                    8,
+                    2, // UART clock
+                    3000000, // 3Mhz
+                    0, // clear turbo
+                    0, // MBOX_TAG_LAST
+                })) {
+                    @panic("failed to set something");
+                }
             },
         }
 
