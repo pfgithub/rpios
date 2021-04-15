@@ -144,6 +144,9 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
     while (true) {
-        uart.putc(uart.getc());
+        switch (uart.getc()) {
+            'h' => uart.puts("Help menu:\r\n- [h]elp\r\n"),
+            else => |c| uart.putc(c),
+        }
     }
 }
