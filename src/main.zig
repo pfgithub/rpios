@@ -61,8 +61,9 @@ const mmio = struct {
 };
 
 const mbox = struct {
-    const mbox_ptr: *align(0b1000) volatile [36]u32 = &(struct {
-        var mbox_raw: [36]u32 align(0b1000) = [_]u32{0} ** 36;
+    const MBOX_MAX_SIZE = 36;
+    const mbox_ptr: *align(0b1000) volatile [MBOX_MAX_SIZE]u32 = &(struct {
+        var mbox_raw: [MBOX_MAX_SIZE]u32 align(0b1000) = [_]u32{undefined} ** MBOX_MAX_SIZE;
     }).mbox_raw;
     const MboxChannel = enum(u4) {
         ch_power = 0,
@@ -79,27 +80,145 @@ const mbox = struct {
     const MBOX_RESPONSE: u32 = 0x80000000;
     const MBOX_EMPTY: u32 = 0x40000000;
 
-    /// https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface#set-clock-rate
-    pub fn call(channel: MboxChannel, args: []const u32) bool {
-        mbox_ptr[0] = @intCast(u32, (args.len + 1) * 4);
-        for (args) |arg, i| mbox_ptr[i + 1] = arg;
+    // b.add(.set_phy_wh, .{.w = 1024, .h = 768})
+    // const real_wh = b.add(.set_virt_wh, .{.w = 1024, .h = 768})
+    // b.add(.set_virt_offset, .{.x = 0, .y = 0})
+    // b.add(.set_depth, 32);
+    // const px_order = b.add(.set_pixel_order, .rgb)
+    // const fb = b.add(.get_framebuffer, .{.ptr = 4096, .size = 0}) // fb.get() should return the actual value & 0x3FFFFFFF; "convert GPU address to ARM address"
+    // const pitch = b.add(.get_pitch, {})
+    // try b.exec();
+    // real_wh.get()
+    // px_order.get()
 
-        if (@ptrToInt(mbox_ptr) & ~@as(usize, 0b111) != @ptrToInt(mbox_ptr)) @panic("misaligned mbox pointer. must be 0b1000 aligned");
-        const r = @intCast(u32, @ptrToInt(mbox_ptr)) | @enumToInt(channel); // if it's align(16), what's the point of & ~0xF?
+    const Builder = struct {
+        // call : copies msg to mbox_ptr : copies mbox_ptr back to msg
+        message: [MBOX_MAX_SIZE]u32 = [_]u32{ undefined, 0 } ++ [_]u32{undefined} ** (MBOX_MAX_SIZE - 2),
+        index: u32 = 1,
 
-        // wait until we can talk to the VC
-        while (mmio.mbox_status.* & MBOX_FULL != 0) spinHint();
-        // send our message to property channel and wait for the response
-        mmio.mbox_write.* = r;
-
-        while (true) {
-            // wait for response
-            while (mmio.mbox_status.* & MBOX_EMPTY != 0) spinHint();
-
-            // if it is ours
-            if (mmio.mbox_read.* == r) return mbox_ptr[1] == MBOX_RESPONSE;
+        fn ArrayLen(comptime Type: type) usize {
+            return @typeInfo(Type).Array.len;
         }
-    }
+        fn Arg0(comptime Type: type) type {
+            return @typeInfo(Type).Fn.args[0].arg_type.?;
+        }
+        fn ReturnType(comptime Type: type) type {
+            return @typeInfo(Type).Fn.return_type.?;
+        }
+        fn LaterResult(comptime Tag: type) type {
+            return struct {
+                // could support runtime known lengths without too much difficulty
+                data: *const [ArrayLen(Arg0(@TypeOf(Tag.unpack)))]u32,
+                pub fn get(this: @This()) ReturnType(@TypeOf(Tag.unpack)) {
+                    return Tag.unpack(this.data.*);
+                }
+            };
+        }
+        fn appendSlice(b: *Builder, arr: []const u32) void {
+            std.mem.copy(u32, b.message[b.index..], arr);
+            b.index += @intCast(u32, arr.len);
+        }
+        /// request: std.meta.ArgsTuple(@TypeOf(Tag.pack))
+        pub fn add(b: *Builder, comptime Tag: type, request: anytype) LaterResult(Tag) {
+            const req_data = @call(.{}, Tag.pack, request);
+            comptime const req_len = ArrayLen(ReturnType(@TypeOf(Tag.pack)));
+            comptime const res_len = ArrayLen(Arg0(@TypeOf(Tag.unpack)));
+            comptime const buffer_size = @intCast(u32, std.math.max(req_len, res_len));
+
+            b.appendSlice(&.{ Tag.tag, buffer_size, 0 });
+            std.mem.copy(u32, b.message[b.index..], &req_data);
+            const res_data = b.message[b.index..][0..res_len];
+            b.index += buffer_size;
+
+            return .{ .data = res_data };
+        }
+        pub fn exec(b: *Builder) !void {
+            b.appendSlice(&.{0});
+            b.message[0] = b.index;
+
+            const channel: MboxChannel = .ch_prop;
+
+            for (b.message[0..b.index]) |v, i| mbox_ptr[i] = v;
+
+            if (@ptrToInt(mbox_ptr) & ~@as(usize, 0b111) != @ptrToInt(mbox_ptr)) @panic("misaligned mbox pointer. must be 0b1000 aligned");
+            const r = @intCast(u32, @ptrToInt(mbox_ptr)) | @enumToInt(channel);
+
+            // wait until we can talk to the VC
+            while (mmio.mbox_status.* & MBOX_FULL != 0) spinHint();
+            // send our message to property channel and wait for the response
+            mmio.mbox_write.* = r;
+
+            while (true) {
+                // wait for response
+                while (mmio.mbox_status.* & MBOX_EMPTY != 0) spinHint();
+
+                // if it is ours
+                if (mmio.mbox_read.* == r) {
+                    for (mbox_ptr[0..b.message.len]) |v, i| b.message[i] = v;
+                    if (b.message[1] == MBOX_RESPONSE) return;
+                    return error.Failure;
+                }
+            }
+        }
+        // fn exec:
+        // append(0)
+        // index++
+        // set message[0] = index
+    };
+
+    // const MboxTag = enum(u32) {
+    //     get_board_serial: 0x00010004, // () → (serial: u64)
+    // };
+    pub const get_board_serial = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00010004;
+        fn pack() [0]u32 {
+            return .{};
+        }
+        fn unpack(response: [2]u32) Response {
+            // std.mem.writeIntNative // readIntNative
+            return .{ .serial_0 = response[0], .serial_1 = response[1] };
+        }
+        const Response = struct {
+            serial_0: u32,
+            serial_1: u32,
+            // TODO serial: u64
+        };
+    };
+    pub const set_clock_rate = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00038002;
+        fn pack(request: Request) [3]u32 {
+            return .{ request.clock_id, request.rate_hz, @boolToInt(request.skip_setting_turbo) };
+        }
+        fn unpack(response: [2]u32) Response {
+            return .{ .clock_id = response[0], .rate = response[1] };
+        }
+        const Request = struct {
+            clock_id: u32,
+            rate_hz: u32,
+            skip_setting_turbo: bool,
+        };
+        const Response = struct {
+            clock_id: u32,
+            rate: u32,
+        };
+    };
+    // // callTag(Tag.get_board_serial, .{})
+    // // callTag(Tag.set_clock_rate, .{.clock_id = 2, .rate_hz = 3000000, .skip_setting_turbo = 0})
+    // pub fn callTag(comptime Tag: type, request: Tag.Request) ?Tag.Response {
+    //     const req_value = request.pack();
+    //     const resp_w = @typeInfo(@typeInfo(Tag.Response).Fn.args[0].arg_type.?).Array.len;
+    //     const total_w = std.math.max(req_value.len, resp_w.len);
+    //     var total_data = []u32{0} ** (3 + total_w);
+
+    //     total_data[0] = Tag.tag;
+    //     total_data[1] = total_w * 4;
+    //     total_data[2] = 0; // I have no idea what this is?
+    //     std.mem.copy(u32, &total_data[3..], &req_value);
+
+    //     call();
+    // }
 };
 
 const uart = struct {
@@ -131,18 +250,13 @@ const uart = struct {
         // Set it to 3Mhz so that we can consistently set the baud rate
         switch (raspi) {
             .raspi3 => {
-                if (!mbox.call(.ch_prop, &[_]u32{
-                    0, // MBOX_REQUEST
-                    0x38002, // MBOX_TAG_SETCLKRATE
-                    12,
-                    8,
-                    2, // UART clock
-                    3000000, // 3Mhz
-                    0, // clear turbo
-                    0, // MBOX_TAG_LAST
-                })) {
-                    @panic("failed to set something");
-                }
+                var b = mbox.Builder{};
+                _ = b.add(mbox.set_clock_rate, .{.{
+                    .clock_id = 2, // UART clock
+                    .rate_hz = 3000000, // 3Mhz
+                    .skip_setting_turbo = false, // clear turbo
+                }});
+                b.exec() catch @panic("failed to set clock rate");
             },
         }
 
@@ -185,6 +299,25 @@ const uart = struct {
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
+
+    var b = mbox.Builder{};
+    const board_serial = b.add(mbox.get_board_serial, .{});
+
+    if (b.exec()) {
+        var hex_fmt = [_]u8{undefined} ** 50;
+        uart.puts("Serial number: ");
+        const serial = board_serial.get();
+        uart.puts(std.fmt.bufPrint(&hex_fmt, "{x},{x}", .{ serial.serial_0, serial.serial_1 }) catch @panic("too long"));
+        uart.puts("\r\n");
+        for (b.message[0..b.index]) |itm, i| {
+            if (i != 0) uart.puts(", ");
+            uart.puts(std.fmt.bufPrint(&hex_fmt, "{x}", .{itm}) catch @panic("too long"));
+        }
+        uart.puts("\r\n");
+    } else |e| {
+        uart.puts("Failed to fetch serial!\r\n");
+    }
+
     while (true) {
         switch (uart.getc()) {
             'h' => uart.puts("Help menu:\r\n- [h]elp\r\n"),
