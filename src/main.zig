@@ -289,15 +289,15 @@ const uart = struct {
     pub fn puts(str: []const u8) void {
         for (str) |char| putc(char);
     }
-    // const WriteError = error{Never};
-    // const Writer = std.io.Writer(void, WriteError, write);
-    // fn write(self: void, bytes: []const u8) WriteError!usize {
-    //     puts(bytes);
-    //     return bytes.len;
-    // }
-    // pub fn writer() Writer {
-    //     return .{ .context = {} };
-    // }
+    const WriteError = error{Never};
+    const Writer = std.io.Writer(void, WriteError, write);
+    fn write(self: void, bytes: []const u8) WriteError!usize {
+        puts(bytes);
+        return bytes.len;
+    }
+    pub fn writer() Writer {
+        return .{ .context = {} };
+    }
 };
 
 var log_location: union(enum) {
@@ -345,8 +345,6 @@ pub fn log(
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
-    // log_location = .uart;
-    // std.log.info("It works! This is the default web page for this web server!", .{});
 
     var b = mbox.Builder{};
     const board_serial = b.add(mbox.get_board_serial, .{});
@@ -365,6 +363,9 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     } else |e| {
         uart.puts("Failed to fetch serial!\r\n");
     }
+
+    log_location = .uart;
+    std.log.info("It works! This is the default web page for this web server!", .{});
 
     while (true) {
         switch (uart.getc()) {
