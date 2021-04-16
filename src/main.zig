@@ -641,11 +641,12 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
 
     framebuffer.init() catch |e| {
         std.log.err("Framebuffer failed to initialize: {}", .{e});
+        @panic("fb init error");
     };
 
     while (true) {
         switch (uart.getc()) {
-            'h' => uart.puts("Help menu:\r\n- [h]elp\r\n- [r]estart\r\n- [s]hutdown\r\n"),
+            'h' => uart.puts("Help menu:\n- [h]elp\n- [r]estart\n- [s]hutdown\n- [p]anic\n"),
             's' => {
                 std.log.info("Shutting down…", .{});
                 power.power_off();
@@ -656,7 +657,16 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
                 power.reset();
                 std.log.info("uuh?", .{});
             },
+            'p' => {
+                @panic("crash");
+            },
             else => |c| uart.putc(c),
         }
     }
+}
+
+pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
+    std.log.emerg("Panicked! {s}", .{msg});
+    while (true) asm volatile ("wfi");
+    // wfi (wait for interrupt) | wfe (wait for event : can be woken up by another core or timer event or something).
 }

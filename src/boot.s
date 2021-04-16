@@ -34,7 +34,7 @@ _start:
     and     x1, x1, #3
     cbz     x1, 2f
     // cpu id > 0, stop
-1:  wfe
+1:  wfi // should be wfe to be able to be woken up, but qemu has this max out a thread because it's not being used properly
     b       1b
 2:  // cpu id == 0
 
@@ -53,4 +53,4 @@ _start:
     // jump to C code, should not return
 4:  bl      zigMain
     // for failsafe, halt this core too
-    // b       1b
+    b       1b
