@@ -121,8 +121,8 @@ const mbox = struct {
 
     const Builder = struct {
         // call : copies msg to mbox_ptr : copies mbox_ptr back to msg
-        message: [MBOX_MAX_SIZE]u32 = [_]u32{ undefined, 0 } ++ [_]u32{undefined} ** (MBOX_MAX_SIZE - 2),
-        index: u32 = 1,
+        message: [MBOX_MAX_SIZE]u32 = [_]u32{ 0xAAAAAAAA, 0 } ++ [_]u32{0xAAAAAAAA} ** (MBOX_MAX_SIZE - 2),
+        index: u32 = 2,
 
         fn ArrayLen(comptime Type: type) usize {
             return @typeInfo(Type).Array.len;
@@ -254,6 +254,132 @@ const mbox = struct {
             device_id: u32,
             power: bool,
             device_exists: bool,
+        };
+    };
+    /// Set physical (display) width/height
+    ///
+    /// Note that the "physical (display)" size is the size of the allocated buffer in memory, not
+    /// the resolution of the video signal sent to the display device.
+    ///
+    /// The response may not be the same as the request so it must be checked. May be the previous
+    /// width/height or 0 for unsupported.
+    pub const set_physical_w_h = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00048003;
+        fn pack(request: WH) [2]u32 {
+            return .{ request.w, request.h };
+        }
+        fn unpack(response: [2]u32) WH {
+            return .{ .w = response[0], .h = response[1] };
+        }
+        const WH = struct {
+            w: u32,
+            h: u32,
+        };
+    };
+    /// Set virtual (buffer) width/height
+    ///
+    /// Note that the "virtual (buffer)" size is the portion of buffer that is sent to the display
+    /// device, not the resolution the buffer itself. This may be smaller than the allocated buffer
+    /// size in order to implement panning.
+    ///
+    /// Response is the same as the request (or modified), to indicate if this configuration is
+    /// supported (in combination with all the other settings). Does not modify the current
+    /// hardware or frame buffer state.
+    pub const set_virtual_w_h = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00048004;
+        fn pack(request: WH) [2]u32 {
+            return .{ request.w, request.h };
+        }
+        fn unpack(response: [2]u32) WH {
+            return .{ .w = response[0], .h = response[1] };
+        }
+        const WH = struct {
+            w: u32,
+            h: u32,
+        };
+    };
+    /// Set virtual offset
+    ///
+    /// The response may not be the same as the request so it must be checked. May be the previous
+    /// offset or 0 for unsupported.
+    pub const set_virtual_offset = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00048009;
+        fn pack(request: XY) [2]u32 {
+            return .{ request.x, request.y };
+        }
+        fn unpack(response: [2]u32) XY {
+            return .{ .x = response[0], .y = response[1] };
+        }
+        const XY = struct {
+            x: u32,
+            y: u32,
+        };
+    };
+    /// The response may not be the same as the request so it must be checked. May be the previous
+    /// depth or 0 for unsupported.
+    pub const set_depth = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00048005;
+        fn pack(request: Request) [1]u32 {
+            return .{request.bits_per_px};
+        }
+        fn unpack(response: [1]u32) Response {
+            return .{ .bits_per_px = response[0] };
+        }
+        const Request = struct {
+            bits_per_px: u32,
+        };
+        const Response = struct {
+            bits_per_px: u32,
+        };
+    };
+    /// The response may not be the same as the request so it must be checked
+    pub const set_pixel_order = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00048006;
+        fn pack(request: Order) [1]u32 {
+            return .{@enumToInt(request)};
+        }
+        fn unpack(response: [1]u32) Order {
+            return std.meta.intToEnum(Order, response[0]) catch @panic("bad pixel order response");
+        }
+        const Order = enum(u1) {
+            bgr = 0,
+            rgb = 1,
+        };
+    };
+    /// If the requested alignment is unsupported then the current base and size (which may be 0 if
+    /// not allocated) is returned and no change occurs.
+    pub const allocate_framebuffer = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00040001;
+        fn pack(request: Request) [1]u32 {
+            return .{request.alignment};
+        }
+        fn unpack(response: [2]u32) Response {
+            if (response[0] == 0) return @as([*]u8, undefined)[0..0];
+            // // convert GPU address to ARM address
+            return @intToPtr([*]u8, response[0] & 0x3FFFFFFF)[0..response[1]];
+        }
+        const Request = struct {
+            alignment: u32,
+        };
+        const Response = []u8;
+    };
+    pub const get_pitch = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00040008;
+        fn pack(request: void) [0]u32 {
+            return .{};
+        }
+        fn unpack(response: [1]u32) Response {
+            return .{ .pitch = response[0] };
+        }
+        const Response = struct {
+            pitch: u32,
         };
     };
     // // callTag(Tag.get_board_serial, .{})
@@ -395,6 +521,32 @@ const power = struct {
     }
 };
 
+const framebuffer = struct {
+    var width: u32 = undefined;
+    var height: u32 = undefined;
+    var pitch: u32 = undefined;
+    var isrgb: u32 = undefined;
+    var lfb: []u8 = undefined;
+    pub fn init() !void {
+        var b = mbox.Builder{};
+        const phys_wh = b.add(mbox.set_physical_w_h, .{ .w = 1024, .h = 768 });
+        const virt_wh = b.add(mbox.set_virtual_w_h, .{ .w = 1024, .h = 768 });
+        const virt_offset = b.add(mbox.set_virtual_offset, .{ .x = 0, .y = 0 });
+        const depth = b.add(mbox.set_depth, .{ .bits_per_px = 32 });
+        const pixel_order = b.add(mbox.set_pixel_order, .rgb);
+        const fb = b.add(mbox.allocate_framebuffer, .{ .alignment = 4096 });
+        const bytes_per_line = b.add(mbox.get_pitch, {});
+        for (b.message) |value, i| {
+            std.log.info("msg[{}] = {x}", .{ i, value });
+        }
+        try b.exec();
+        const fb_ptr = fb.get();
+        if (fb_ptr.len == 0) return error.PtrLen0;
+        std.log.info("Got framebuffer {}x{} {}. {*}[0..{}]", .{ phys_wh.get().w, phys_wh.get().h, pixel_order.get(), fb_ptr.ptr, fb_ptr.len });
+        // https://github.com/bztsrc/raspi3-tutorial/blob/master/09_framebuffer/lfb.c
+    }
+};
+
 var log_location: union(enum) {
     discard,
     uart,
@@ -461,6 +613,10 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
 
     log_location = .uart;
     std.log.info("It works! This is the default web page for this web server!", .{});
+
+    framebuffer.init() catch |e| {
+        std.log.err("Framebuffer failed to initialize: {}", .{e});
+    };
 
     while (true) {
         switch (uart.getc()) {
