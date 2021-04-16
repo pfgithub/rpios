@@ -546,33 +546,15 @@ const framebuffer = struct {
             std.log.info("msg[{}] = {} (0x{x})", .{ i, value, value });
         }
 
-        const phys_wh = phys_wh_key.get() catch |e| {
-            std.log.err("could not get phys wh", .{});
-            return error.NoPhysWH;
-        };
-        const virt_wh = virt_wh_key.get() catch |e| {
-            std.log.err("could not get virt wh", .{});
-            return error.NoVirtWH;
-        };
-        const virt_offset = virt_offset_key.get() catch |e| {
-            std.log.err("could not get virtual offset", .{});
-            return error.NoVirtOffset;
-        };
-        const depth = depth_key.get() catch |e| {
-            std.log.err("could not get depth", .{});
-            return error.NoDepth;
-        };
+        const phys_wh = try phys_wh_key.get();
+        const virt_wh = try virt_wh_key.get();
+        const virt_offset = try virt_offset_key.get();
+        const depth = try depth_key.get();
         if (depth.bits_per_px != 32) return error.UnsupportedDepth;
         const pixel_order = pixel_order_key.get() catch .rgb;
-        const fb = fb_key.get() catch |e| {
-            std.log.err("could not get framebuffer", .{});
-            return error.NoKey;
-        };
+        const fb = try fb_key.get();
         if (fb.len == 0) return error.NoFrameBuffer;
-        const bytes_per_line = bytes_per_line_key.get() catch |e| {
-            std.log.err("could not get bytes per line", .{});
-            return error.NoBytesPerLine;
-        };
+        const bytes_per_line = try bytes_per_line_key.get();
 
         if (fb.len == 0) return error.PtrLen0;
         std.log.info("Got framebuffer {}x{}:{} {}. {*}[0..{}]", .{
