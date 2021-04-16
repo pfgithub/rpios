@@ -542,7 +542,14 @@ const framebuffer = struct {
         try b.exec();
         const fb_ptr = fb.get();
         if (fb_ptr.len == 0) return error.PtrLen0;
-        std.log.info("Got framebuffer {}x{} {}. {*}[0..{}]", .{ phys_wh.get().w, phys_wh.get().h, pixel_order.get(), fb_ptr.ptr, fb_ptr.len });
+        std.log.info("Got framebuffer {}x{}:{} {}. {*}[0..{}]", .{
+            phys_wh.get().w,
+            phys_wh.get().h,
+            bytes_per_line.get().pitch,
+            pixel_order.get(),
+            fb_ptr.ptr,
+            fb_ptr.len,
+        });
         // https://github.com/bztsrc/raspi3-tutorial/blob/master/09_framebuffer/lfb.c
     }
 };
