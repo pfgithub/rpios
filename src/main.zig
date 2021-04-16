@@ -18,18 +18,9 @@ fn delay(count: i32) void {
 }
 
 const mmio = struct {
-    const base = @intToPtr([*]volatile u32, switch (raspi) {
+    const base_mmio = @intToPtr([*]volatile u32, switch (raspi) {
         .raspi3 => 0x3F000000,
     });
-
-    // The offsets for reach register.
-    const gpio_base = base + 0x200000 / 4;
-
-    // Controls actuation of pull up/down to ALL GPIO pins.
-    const gppud = @ptrCast(*volatile u32, gpio_base + 0x94 / 4);
-
-    // Controls actuation of pull up/down for specific GPIO pin.
-    const gppudclk0 = @ptrCast(*volatile u32, gpio_base + 0x98 / 4);
 
     // The base address for UART.
     const uart0_base = gpio_base + 0x1000 / 4; // for raspi4 0xFE201000, raspi2 & 3 0x3F201000, and 0x20201000 for raspi1
@@ -55,17 +46,46 @@ const mmio = struct {
     const uart0_tdr = @ptrCast(*volatile u32, uart0_base + 0x8C / 4);
 
     // The offsets for Mailbox registers
-    const mbox_base = base + 0xB880 / 4;
+    const mbox_base = base_mmio + 0xB880 / 4;
     const mbox_read = @ptrCast(*volatile u32, mbox_base + 0x00 / 4);
     const mbox_status = @ptrCast(*volatile u32, mbox_base + 0x18 / 4);
     const mbox_write = @ptrCast(*volatile u32, mbox_base + 0x20 / 4);
 
     // Random numbers
-    const rng_base = gpio_base + 0x104000 / 4;
+    const rng_base = base_mmio + 0x104000 / 4;
     const rng_ctrl = @ptrCast(*volatile u32, gpio_base + 0x00 / 4);
     const rng_status = @ptrCast(*volatile u32, gpio_base + 0x04 / 4);
     const rng_data = @ptrCast(*volatile u32, gpio_base + 0x08 / 4);
     const rng_int_mask = @ptrCast(*volatile u32, gpio_base + 0x10 / 4);
+
+    // Power management
+    const pm_base = base_mmio + 0x100000 / 4;
+    const pm_rstc = @ptrCast(*volatile u32, pm_base + 0x1c / 4);
+    const pm_rsts = @ptrCast(*volatile u32, pm_base + 0x20 / 4);
+    const pm_wdog = @ptrCast(*volatile u32, pm_base + 0x24 / 4);
+
+    // The offsets for reach register.
+    const gpio_base = base_mmio + 0x200000 / 4;
+    const gpfsel0 = @ptrCast(*volatile u32, gpio_base + 0x0 / 4);
+    const gpfsel1 = @ptrCast(*volatile u32, gpio_base + 0x4 / 4);
+    const gpfsel2 = @ptrCast(*volatile u32, gpio_base + 0x8 / 4);
+    const gpfsel3 = @ptrCast(*volatile u32, gpio_base + 0xC / 4);
+    const gpfsel4 = @ptrCast(*volatile u32, gpio_base + 0x10 / 4);
+    const gpfsel5 = @ptrCast(*volatile u32, gpio_base + 0x14 / 4);
+    const gpset0 = @ptrCast(*volatile u32, gpio_base + 0x1C / 4);
+    const gpset1 = @ptrCast(*volatile u32, gpio_base + 0x20 / 4);
+    const gpclr0 = @ptrCast(*volatile u32, gpio_base + 0x28 / 4);
+    const gplev0 = @ptrCast(*volatile u32, gpio_base + 0x34 / 4);
+    const gplev1 = @ptrCast(*volatile u32, gpio_base + 0x38 / 4);
+    const gpeds0 = @ptrCast(*volatile u32, gpio_base + 0x40 / 4);
+    const gpeds1 = @ptrCast(*volatile u32, gpio_base + 0x44 / 4);
+    const gphen0 = @ptrCast(*volatile u32, gpio_base + 0x64 / 4);
+    const gphen1 = @ptrCast(*volatile u32, gpio_base + 0x68 / 4);
+    // Controls actuation of pull up/down to ALL GPIO pins.
+    const gppud = @ptrCast(*volatile u32, gpio_base + 0x94 / 4);
+    // Controls actuation of pull up/down for specific GPIO pin.
+    const gppudclk0 = @ptrCast(*volatile u32, gpio_base + 0x98 / 4);
+    const gppudclk1 = @ptrCast(*volatile u32, gpio_base + 0x9C / 4);
 };
 
 const mbox = struct {
@@ -127,8 +147,8 @@ const mbox = struct {
             b.index += @intCast(u32, arr.len);
         }
         /// request: std.meta.ArgsTuple(@TypeOf(Tag.pack))
-        pub fn add(b: *Builder, comptime Tag: type, request: anytype) LaterResult(Tag) {
-            const req_data = @call(.{}, Tag.pack, request);
+        pub fn add(b: *Builder, comptime Tag: type, request: Arg0(@TypeOf(Tag.pack))) LaterResult(Tag) {
+            const req_data = Tag.pack(request);
             comptime const req_len = ArrayLen(ReturnType(@TypeOf(Tag.pack)));
             comptime const res_len = ArrayLen(Arg0(@TypeOf(Tag.unpack)));
             comptime const buffer_size = @intCast(u32, std.math.max(req_len, res_len));
@@ -180,7 +200,7 @@ const mbox = struct {
     pub const get_board_serial = struct {
         const channel: MboxChannel = .ch_prop;
         const tag: u32 = 0x00010004;
-        fn pack() [0]u32 {
+        fn pack(_: void) [0]u32 {
             return .{};
         }
         fn unpack(response: [2]u32) Response {
@@ -210,6 +230,30 @@ const mbox = struct {
         const Response = struct {
             clock_id: u32,
             rate: u32,
+        };
+    };
+    pub const set_power_state = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00028001;
+        fn pack(request: Request) [2]u32 {
+            return .{ request.device_id, (@as(u32, @boolToInt(request.power)) << 1) & @boolToInt(request.wait) };
+        }
+        fn unpack(response: [2]u32) Response {
+            return .{
+                .device_id = response[0],
+                .power = response[1] & 0b1 != 0,
+                .device_exists = response[1] & 0b10 != 0,
+            };
+        }
+        const Request = struct {
+            device_id: u32,
+            power: bool,
+            wait: bool,
+        };
+        const Response = struct {
+            device_id: u32,
+            power: bool,
+            device_exists: bool,
         };
     };
     // // callTag(Tag.get_board_serial, .{})
@@ -257,11 +301,11 @@ const uart = struct {
         switch (raspi) {
             .raspi3 => {
                 var b = mbox.Builder{};
-                _ = b.add(mbox.set_clock_rate, .{.{
+                _ = b.add(mbox.set_clock_rate, .{
                     .clock_id = 2, // UART clock
                     .rate_hz = 3000000, // 3Mhz
                     .skip_setting_turbo = false, // clear turbo
-                }});
+                });
                 b.exec() catch @panic("failed to set clock rate");
             },
         }
@@ -303,6 +347,51 @@ const uart = struct {
     }
     pub fn writer() Writer {
         return .{ .context = {} };
+    }
+};
+
+pub fn range(max: usize) []const void {
+    return @as([]const void, &[_]void{}).ptr[0..max];
+}
+
+const power = struct {
+    const PM_WDOG_MAGIC: u32 = 0x5a000000;
+    const PM_RSTC_FULLRST: u32 = 0x00000020;
+    pub fn power_off() void {
+        // power off devices one by one
+        for (range(16)) |_, r| {
+            var b = mbox.Builder{};
+            _ = b.add(mbox.set_power_state, .{ .device_id = @intCast(u32, r), .power = false, .wait = false });
+            b.exec() catch {};
+        }
+
+        // power off gpio pins (but not VCC pins)
+        mmio.gpfsel0.* = 0;
+        mmio.gpfsel1.* = 0;
+        mmio.gpfsel2.* = 0;
+        mmio.gpfsel3.* = 0;
+        mmio.gpfsel4.* = 0;
+        mmio.gpfsel5.* = 0;
+        mmio.gppud.* = 0;
+        delay(150);
+        mmio.gppudclk0.* = 0xffffffff;
+        mmio.gppudclk1.* = 0xffffffff;
+        delay(150);
+        mmio.gppudclk0.* = 0;
+        mmio.gppudclk1.* = 0;
+
+        // power off the SoC (GPU + CPU)
+        const r: u32 = (mmio.pm_rsts.* & 0x555) | 0x555; // partition 63 used to indicate halt
+        mmio.pm_rsts.* = PM_WDOG_MAGIC | r;
+        mmio.pm_wdog.* = PM_WDOG_MAGIC | 10;
+        mmio.pm_rstc.* = PM_WDOG_MAGIC | PM_RSTC_FULLRST;
+    }
+    pub fn reset() void {
+        const r: u32 = mmio.pm_rsts.* & 0x555;
+        // trigger a restart by instructing the GPU to boot from partition 0
+        mmio.pm_rsts.* = PM_WDOG_MAGIC | r; // boot from partition 0
+        mmio.pm_wdog.* = PM_WDOG_MAGIC | 10;
+        mmio.pm_rstc.* = PM_WDOG_MAGIC | PM_RSTC_FULLRST;
     }
 };
 
@@ -353,7 +442,7 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.puts("Hello, kernel World!\r\n");
 
     var b = mbox.Builder{};
-    const board_serial = b.add(mbox.get_board_serial, .{});
+    const board_serial = b.add(mbox.get_board_serial, {});
 
     if (b.exec()) {
         var hex_fmt = [_]u8{undefined} ** 50;
@@ -375,7 +464,17 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
 
     while (true) {
         switch (uart.getc()) {
-            'h' => uart.puts("Help menu:\r\n- [h]elp\r\n"),
+            'h' => uart.puts("Help menu:\r\n- [h]elp\r\n- [r]estart\r\n- [s]hutdown\r\n"),
+            's' => {
+                std.log.info("Shutting down…", .{});
+                power.power_off();
+                std.log.info("uuh?", .{});
+            },
+            'r' => {
+                std.log.info("Resetting…", .{});
+                power.reset();
+                std.log.info("uuh?", .{});
+            },
             else => |c| uart.putc(c),
         }
     }
