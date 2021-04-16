@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("kernel8.img", "src/main.zig");
 
     const model: Model = .{
-        .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53" }) catch unreachable,
+        .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53-neon" }) catch unreachable,
         .machine = "raspi3",
     };
 
@@ -19,7 +19,7 @@ pub fn build(b: *std.build.Builder) void {
     // qemu-system-aarch64 -M raspi3 -serial stdio -kernel zig-cache/bin/kernel8.img
 
     exe.addAssemblyFile("src/boot.s");
-    exe.addCSourceFile("src/sample_c.c", &.{});
+    exe.addCSourceFile("src/deps/sd.c", &.{});
 
     exe.setTarget(model.target);
     exe.setBuildMode(mode);
@@ -33,6 +33,8 @@ pub fn build(b: *std.build.Builder) void {
         model.machine,
         "-serial",
         "stdio",
+        "-drive",
+        "file=src/boot.s,if=sd,format=raw",
         "-kernel",
         b.getInstallPath(exe.install_step.?.dest_dir, exe.out_filename),
     });

@@ -38,6 +38,7 @@ SECTIONS
         *(COMMON)
         __bss_end = .;
     }
+    . = ALIGN(8);
     _end = .;
 
    /DISCARD/ : { *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) }

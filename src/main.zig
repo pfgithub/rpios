@@ -8,13 +8,13 @@ pub fn spinHint() void {
     asm volatile ("YIELD");
 }
 
-fn delay(count: i32) void {
-    asm volatile ("__delay_%=: subs %[count], %[count], #1; bne __delay_%=\n"
-        : [ret] "=r" (count)
-        : [count] "0" (count)
-        : "cc"
-    );
-    // for(range(count)) asm volatile("nop") should be good enough
+fn delay(count: u32) void {
+    // asm volatile ("__delay_%=: subs %[count], %[count], #1; bne __delay_%=\n"
+    //     : [ret] "=r" (count)
+    //     : [count] "0" (count)
+    //     : "cc"
+    // );
+    for (range(count)) |_| spinHint(); // should be good enough
 }
 
 const mmio = struct {
@@ -594,6 +594,31 @@ const framebuffer = struct {
     }
 };
 
+const sd = struct {
+    extern fn sd_init() c_int;
+    extern fn sd_readblock(lba: c_uint, buffer: [*][512]u8, num: c_uint) c_int;
+    export fn uart_puts(text: [*:0]u8) void {
+        uart.puts(std.mem.spanZ(text));
+    }
+    export fn uart_hex(value: c_uint) void {
+        uart.writer().print("{x:0<16}", .{value}) catch unreachable;
+    }
+    export fn wait_cycles(value: c_uint) void {
+        delay(value);
+    }
+    pub fn init() !void {
+        switch (sd_init()) {
+            0 => {},
+            -1 => return error.SdTimeout,
+            -2 => return error.SdError,
+            else => unreachable,
+        }
+    }
+    pub fn readblock(sector: u32, buffer: [][512]u8) !void {
+        if (sd_readblock(sector, buffer.ptr, @intCast(c_uint, buffer.len)) == 0) return error.ReadblockError;
+    }
+};
+
 var log_location: union(enum) {
     discard,
     uart,
@@ -636,6 +661,62 @@ pub fn log(
 // #else
 // // arguments for AArch32
 // void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
+
+extern var _end: opaque {};
+
+fn hexdump(data: []const u8) void {
+    const out = uart.writer();
+    var i: usize = 0;
+    while (i < data.len) {
+        out.print("0x{x:0>8}: ", .{i}) catch unreachable;
+        for (range(16)) |_, offset| {
+            if (i + offset < data.len) {
+                out.print("{x:0>2} ", .{data[i + offset]}) catch unreachable;
+            } else {
+                out.print(".. ", .{}) catch unreachable;
+            }
+            if (offset % 4 == 3) uart.putc(' ');
+        }
+        for (range(16)) |_, offset| {
+            if (i + offset >= data.len) break;
+            const char = data[i + offset];
+
+            if (std.ascii.isPrint(char)) uart.putc(char) //
+            else uart.puts("·");
+        }
+        i += 16;
+        uart.putc('\n');
+    }
+}
+
+fn main() !void {
+    const end_of_kernel = @ptrCast([*]u8, &_end);
+    try sd.init();
+    try sd.readblock(0, @ptrCast([*][512]u8, end_of_kernel)[0..1]);
+
+    hexdump(end_of_kernel[0..512]);
+
+    while (true) {
+        switch (uart.getc()) {
+            'h' => uart.puts("Help menu:\n- [h]elp\n- [r]estart\n- [s]hutdown\n- [p]anic\n"),
+            's' => {
+                std.log.info("Shutting down…", .{});
+                power.power_off();
+                std.log.info("uuh?", .{});
+            },
+            'r' => {
+                std.log.info("Resetting…", .{});
+                power.reset();
+                std.log.info("uuh?", .{});
+            },
+            'p' => {
+                @panic("crash");
+            },
+            else => |c| uart.putc(c),
+        }
+    }
+}
+
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
@@ -672,29 +753,18 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     };
     framebuffer.draw_image();
 
-    while (true) {
-        switch (uart.getc()) {
-            'h' => uart.puts("Help menu:\n- [h]elp\n- [r]estart\n- [s]hutdown\n- [p]anic\n"),
-            's' => {
-                std.log.info("Shutting down…", .{});
-                power.power_off();
-                std.log.info("uuh?", .{});
-            },
-            'r' => {
-                std.log.info("Resetting…", .{});
-                power.reset();
-                std.log.info("uuh?", .{});
-            },
-            'p' => {
-                @panic("crash");
-            },
-            else => |c| uart.putc(c),
-        }
-    }
+    hexdump("Testing hexdump. It appears to work, great!");
+
+    main() catch |e| {
+        std.log.err("Main error: {}", .{e});
+        @panic("Main exited with error.");
+    };
+    @panic("Main exited without error.");
 }
 
 pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
     std.log.emerg("Panicked! {s}", .{msg});
+    @breakpoint();
     while (true) asm volatile ("wfi");
     // wfi (wait for interrupt) | wfe (wait for event : can be woken up by another core or timer event or something).
 }
