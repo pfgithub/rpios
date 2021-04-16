@@ -164,7 +164,7 @@ const mbox = struct {
         }
         pub fn exec(b: *Builder) !void {
             b.appendSlice(&.{0});
-            b.message[0] = b.index;
+            b.message[0] = b.index * 4;
 
             const channel: MboxChannel = .ch_prop;
 
