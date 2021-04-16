@@ -363,8 +363,9 @@ const mbox = struct {
         }
         fn unpack(response: [2]u32) Response {
             if (response[0] == 0) return @as([*]u8, undefined)[0..0];
-            // // convert GPU address to ARM address
-            return @intToPtr([*]u8, response[0] & 0x3FFFFFFF)[0..response[1]];
+            // & 0x3FFFFFFF? that just cuts off the value if it goes out of memory, why would you do that?
+            // better to catch the error it causes
+            return @intToPtr([*]u8, response[0])[0..response[1]];
         }
         const Request = struct {
             alignment: u32,
@@ -384,21 +385,28 @@ const mbox = struct {
             pitch: u32,
         };
     };
-    // // callTag(Tag.get_board_serial, .{})
-    // // callTag(Tag.set_clock_rate, .{.clock_id = 2, .rate_hz = 3000000, .skip_setting_turbo = 0})
-    // pub fn callTag(comptime Tag: type, request: Tag.Request) ?Tag.Response {
-    //     const req_value = request.pack();
-    //     const resp_w = @typeInfo(@typeInfo(Tag.Response).Fn.args[0].arg_type.?).Array.len;
-    //     const total_w = std.math.max(req_value.len, resp_w.len);
-    //     var total_data = []u32{0} ** (3 + total_w);
-
-    //     total_data[0] = Tag.tag;
-    //     total_data[1] = total_w * 4;
-    //     total_data[2] = 0; // I have no idea what this is?
-    //     std.mem.copy(u32, &total_data[3..], &req_value);
-
-    //     call();
-    // }
+    /// Future formats may specify multiple base+size combinations.
+    pub const get_arm_memory = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00010005;
+        fn pack(request: void) [0]u32 {
+            return .{};
+        }
+        fn unpack(response: [2]u32) []allowzero u8 {
+            return @intToPtr([*]allowzero u8, response[0])[0..response[1]];
+        }
+    };
+    /// Future formats may specify multiple base+size combinations.
+    pub const get_vc_memory = struct {
+        const channel: MboxChannel = .ch_prop;
+        const tag: u32 = 0x00010006;
+        fn pack(request: void) [0]u32 {
+            return .{};
+        }
+        fn unpack(response: [2]u32) []allowzero u8 {
+            return @intToPtr([*]allowzero u8, response[0])[0..response[1]];
+        }
+    };
 };
 
 const uart = struct {
@@ -690,6 +698,17 @@ fn hexdump(data: []const u8) void {
 }
 
 fn main() !void {
+    {
+        var b = mbox.Builder{};
+        const memory_tag = b.add(mbox.get_arm_memory, {});
+        const vcmem_tag = b.add(mbox.get_vc_memory, {});
+        try b.exec();
+        const memory = try memory_tag.get();
+        const vcmem = try vcmem_tag.get();
+        std.log.info("Available memory: {*}[0..0x{X}]", .{ memory.ptr, memory.len });
+        std.log.info("VC memory: {*}[0..0x{X}]", .{ vcmem.ptr, vcmem.len });
+    }
+
     const end_of_kernel = @ptrCast([*]u8, &_end);
     try sd.init();
     try sd.readblock(0, @ptrCast([*][512]u8, end_of_kernel)[0..1]);
