@@ -640,6 +640,8 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
     uart.puts("Hello, kernel World!\r\n");
 
+    // https://github.com/bztsrc/raspi3-tutorial
+
     var b = mbox.Builder{};
     const board_serial = b.add(mbox.get_board_serial, {});
 
