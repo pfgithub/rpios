@@ -61,7 +61,7 @@ const mmio = struct {
     const mbox_write = @ptrCast(*volatile u32, mbox_base + 0x20 / 4);
 
     // Random numbers
-    const rng_base = gpio_base + 0x00104000 / 4;
+    const rng_base = gpio_base + 0x104000 / 4;
     const rng_ctrl = @ptrCast(*volatile u32, gpio_base + 0x00 / 4);
     const rng_status = @ptrCast(*volatile u32, gpio_base + 0x04 / 4);
     const rng_data = @ptrCast(*volatile u32, gpio_base + 0x08 / 4);
@@ -303,18 +303,6 @@ const uart = struct {
     }
     pub fn writer() Writer {
         return .{ .context = {} };
-    }
-};
-
-const rand = struct {
-    pub fn init() void {
-        mmio.rng_status.* = 0x40000;
-        mmio.rng_int_mask.* |= 1;
-        mmio.rng_ctrl.* |= 1;
-    }
-    pub fn rand() u32 {
-        while (mmio.rng_status.* >> 24 == 0) spinHint();
-        return mmio.rng_data.*;
     }
 };
 
