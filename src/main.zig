@@ -565,7 +565,23 @@ const framebuffer = struct {
             fb.ptr,
             fb.len,
         });
+
+        lfb = fb;
         // https://github.com/bztsrc/raspi3-tutorial/blob/master/09_framebuffer/lfb.c
+    }
+    const fb_image_example = @embedFile("deps/raspbian.rgba");
+    pub fn draw_image() void {
+        const H = 256;
+        const W = 256;
+        const C = 4;
+        for (range(H)) |_, y| {
+            for (range(W)) |_, x| {
+                lfb[0 + (x * C) + (y * W * C)] = fb_image_example[0 + (x * C) + (y * W * C)];
+                lfb[1 + (x * C) + (y * W * C)] = fb_image_example[1 + (x * C) + (y * W * C)];
+                lfb[2 + (x * C) + (y * W * C)] = fb_image_example[2 + (x * C) + (y * W * C)];
+                lfb[3 + (x * C) + (y * W * C)] = fb_image_example[3 + (x * C) + (y * W * C)];
+            }
+        }
     }
 };
 
@@ -643,6 +659,7 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
         std.log.err("Framebuffer failed to initialize: {}", .{e});
         @panic("fb init error");
     };
+    framebuffer.draw_image();
 
     while (true) {
         switch (uart.getc()) {
