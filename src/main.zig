@@ -136,9 +136,10 @@ const mbox = struct {
         fn LaterResult(comptime Tag: type) type {
             return struct {
                 // could support runtime known lengths without too much difficulty
-                data: *const [ArrayLen(Arg0(@TypeOf(Tag.unpack)))]u32,
-                pub fn get(this: @This()) ReturnType(@TypeOf(Tag.unpack)) {
-                    return Tag.unpack(this.data.*);
+                data: *const [ArrayLen(Arg0(@TypeOf(Tag.unpack))) + 1]u32,
+                pub fn get(this: @This()) !ReturnType(@TypeOf(Tag.unpack)) {
+                    if (this.data[0] & (0b1 << 31) == 0) return error.ResponseNotSet;
+                    return Tag.unpack(this.data[1..].*);
                 }
             };
         }
@@ -153,9 +154,10 @@ const mbox = struct {
             comptime const res_len = ArrayLen(Arg0(@TypeOf(Tag.unpack)));
             comptime const buffer_size = @intCast(u32, std.math.max(req_len, res_len));
 
-            b.appendSlice(&.{ Tag.tag, buffer_size, 0 });
+            b.appendSlice(&.{ Tag.tag, buffer_size * 4 });
+            const res_data = b.message[b.index..][0 .. res_len + 1];
+            b.appendSlice(&.{0});
             std.mem.copy(u32, b.message[b.index..], &req_data);
-            const res_data = b.message[b.index..][0..res_len];
             b.index += buffer_size;
 
             return .{ .data = res_data };
@@ -529,26 +531,57 @@ const framebuffer = struct {
     var lfb: []u8 = undefined;
     pub fn init() !void {
         var b = mbox.Builder{};
-        const phys_wh = b.add(mbox.set_physical_w_h, .{ .w = 1024, .h = 768 });
-        const virt_wh = b.add(mbox.set_virtual_w_h, .{ .w = 1024, .h = 768 });
-        const virt_offset = b.add(mbox.set_virtual_offset, .{ .x = 0, .y = 0 });
-        const depth = b.add(mbox.set_depth, .{ .bits_per_px = 32 });
-        const pixel_order = b.add(mbox.set_pixel_order, .rgb);
-        const fb = b.add(mbox.allocate_framebuffer, .{ .alignment = 4096 });
-        const bytes_per_line = b.add(mbox.get_pitch, {});
+        const phys_wh_key = b.add(mbox.set_physical_w_h, .{ .w = 1024, .h = 768 });
+        const virt_wh_key = b.add(mbox.set_virtual_w_h, .{ .w = 1024, .h = 768 });
+        const virt_offset_key = b.add(mbox.set_virtual_offset, .{ .x = 0, .y = 0 });
+        const depth_key = b.add(mbox.set_depth, .{ .bits_per_px = 32 });
+        const pixel_order_key = b.add(mbox.set_pixel_order, .rgb);
+        const fb_key = b.add(mbox.allocate_framebuffer, .{ .alignment = 4096 });
+        const bytes_per_line_key = b.add(mbox.get_pitch, {});
         for (b.message) |value, i| {
-            std.log.info("msg[{}] = {x}", .{ i, value });
+            std.log.info("msg[{}] = {} (0x{x})", .{ i, value, value });
         }
         try b.exec();
-        const fb_ptr = fb.get();
-        if (fb_ptr.len == 0) return error.PtrLen0;
+        for (b.message) |value, i| {
+            std.log.info("msg[{}] = {} (0x{x})", .{ i, value, value });
+        }
+
+        const phys_wh = phys_wh_key.get() catch |e| {
+            std.log.err("could not get phys wh", .{});
+            return error.NoPhysWH;
+        };
+        const virt_wh = virt_wh_key.get() catch |e| {
+            std.log.err("could not get virt wh", .{});
+            return error.NoVirtWH;
+        };
+        const virt_offset = virt_offset_key.get() catch |e| {
+            std.log.err("could not get virtual offset", .{});
+            return error.NoVirtOffset;
+        };
+        const depth = depth_key.get() catch |e| {
+            std.log.err("could not get depth", .{});
+            return error.NoDepth;
+        };
+        if (depth.bits_per_px != 32) return error.UnsupportedDepth;
+        const pixel_order = pixel_order_key.get() catch .rgb;
+        const fb = fb_key.get() catch |e| {
+            std.log.err("could not get framebuffer", .{});
+            return error.NoKey;
+        };
+        if (fb.len == 0) return error.NoFrameBuffer;
+        const bytes_per_line = bytes_per_line_key.get() catch |e| {
+            std.log.err("could not get bytes per line", .{});
+            return error.NoBytesPerLine;
+        };
+
+        if (fb.len == 0) return error.PtrLen0;
         std.log.info("Got framebuffer {}x{}:{} {}. {*}[0..{}]", .{
-            phys_wh.get().w,
-            phys_wh.get().h,
-            bytes_per_line.get().pitch,
-            pixel_order.get(),
-            fb_ptr.ptr,
-            fb_ptr.len,
+            phys_wh.w,
+            phys_wh.h,
+            bytes_per_line.pitch,
+            pixel_order,
+            fb.ptr,
+            fb.len,
         });
         // https://github.com/bztsrc/raspi3-tutorial/blob/master/09_framebuffer/lfb.c
     }
@@ -606,14 +639,17 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     if (b.exec()) {
         var hex_fmt = [_]u8{undefined} ** 50;
         uart.puts("Serial number: ");
-        const serial = board_serial.get();
-        uart.puts(std.fmt.bufPrint(&hex_fmt, "{x},{x}", .{ serial.serial_0, serial.serial_1 }) catch @panic("too long"));
-        uart.puts("\r\n");
-        for (b.message[0..b.index]) |itm, i| {
-            if (i != 0) uart.puts(", ");
-            uart.puts(std.fmt.bufPrint(&hex_fmt, "{x}", .{itm}) catch @panic("too long"));
+        if (board_serial.get()) |serial| {
+            uart.puts(std.fmt.bufPrint(&hex_fmt, "{x},{x}", .{ serial.serial_0, serial.serial_1 }) catch @panic("too long"));
+            uart.puts("\r\n");
+            for (b.message[0..b.index]) |itm, i| {
+                if (i != 0) uart.puts(", ");
+                uart.puts(std.fmt.bufPrint(&hex_fmt, "{x}", .{itm}) catch @panic("too long"));
+            }
+            uart.puts("\r\n");
+        } else |e| {
+            uart.puts(std.fmt.bufPrint(&hex_fmt, "serial {}\r\n", .{e}) catch @panic("too long"));
         }
-        uart.puts("\r\n");
     } else |e| {
         uart.puts("Failed to fetch serial!\r\n");
     }
