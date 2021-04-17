@@ -219,18 +219,34 @@ const mbox = struct {
         const channel: MboxChannel = .ch_prop;
         const tag: u32 = 0x00038002;
         fn pack(request: Request) [3]u32 {
-            return .{ request.clock_id, request.rate_hz, @boolToInt(request.skip_setting_turbo) };
+            return .{ @enumToInt(request.clock_id), request.rate_hz, @boolToInt(request.skip_setting_turbo) };
         }
         fn unpack(response: [2]u32) Response {
-            return .{ .clock_id = response[0], .rate = response[1] };
+            return .{ .clock_id = @intToEnum(Clock, response[0]), .rate = response[1] };
         }
+        const Clock = enum(u32) {
+            emmc = 0x000000001,
+            uart = 0x000000002,
+            arm = 0x000000003,
+            core = 0x000000004,
+            v3d = 0x000000005,
+            h264 = 0x000000006,
+            isp = 0x000000007,
+            sdram = 0x000000008,
+            pixel = 0x000000009,
+            pwm = 0x00000000a,
+            hevc = 0x00000000b,
+            emmc2 = 0x00000000c,
+            m2mc = 0x00000000d,
+            pixel_bvb = 0x00000000e,
+        };
         const Request = struct {
-            clock_id: u32,
+            clock_id: Clock,
             rate_hz: u32,
             skip_setting_turbo: bool,
         };
         const Response = struct {
-            clock_id: u32,
+            clock_id: Clock,
             rate: u32,
         };
     };
@@ -438,7 +454,7 @@ const uart = struct {
             .raspi3 => {
                 var b = mbox.Builder{};
                 _ = b.add(mbox.set_clock_rate, .{
-                    .clock_id = 2, // UART clock
+                    .clock_id = .uart, // UART clock
                     .rate_hz = 3000000, // 3Mhz
                     .skip_setting_turbo = false, // clear turbo
                 });
