@@ -425,7 +425,7 @@ const mbox = struct {
     };
 };
 
-const uart = struct {
+pub const uart = struct {
     pub fn init() void {
         // Disable UART0.
         mmio.uart0_cr.* = 0x00000000;
@@ -720,7 +720,21 @@ fn hexdump(data: []const u8) void {
     }
 }
 
+var root_allocator_fba: std.heap.FixedBufferAllocator = undefined;
+var root_allocator: *std.mem.Allocator = undefined;
+
 fn main() !void {
+    uart.init();
+    log_location = .uart;
+
+    uart.puts("Starting…\n");
+    std.log.info("It works! This is the default web page for this web server!", .{});
+
+    try framebuffer.init();
+    framebuffer.draw_image();
+
+    hexdump("Testing hexdump. It appears to work, great!");
+
     {
         var b = mbox.Builder{};
         const memory_tag = b.add(mbox.get_arm_memory, {});
@@ -730,13 +744,20 @@ fn main() !void {
         const vcmem = try vcmem_tag.get();
         std.log.info("Available memory: {*}[0..0x{X}]", .{ memory.ptr, memory.len });
         std.log.info("VC memory: {*}[0..0x{X}]", .{ vcmem.ptr, vcmem.len });
+
+        root_allocator_fba = blk: {
+            const end_of_kernel = @ptrCast([*]u8, &_end);
+            const total_mem = @ptrToInt(memory.ptr) + memory.len - @ptrToInt(end_of_kernel);
+            break :blk std.heap.FixedBufferAllocator.init(end_of_kernel[0..memory.len]);
+        };
+        root_allocator = &root_allocator_fba.allocator;
     }
 
-    const end_of_kernel = @ptrCast([*]u8, &_end);
     try sd.init();
-    try sd.readblock(0, @ptrCast([*][512]u8, end_of_kernel)[0..1]);
+    const read_block = try root_allocator.alloc([512]u8, 1);
+    try sd.readblock(0, read_block);
 
-    hexdump(end_of_kernel[0..512]);
+    hexdump(@ptrCast([*]const u8, read_block.ptr)[0 .. read_block.len * 512]);
 
     while (true) {
         switch (uart.getc()) {
@@ -760,42 +781,6 @@ fn main() !void {
 }
 
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
-    uart.init();
-    log_location = .uart;
-    uart.puts("Hello, kernel World!\r\n");
-
-    // https://github.com/bztsrc/raspi3-tutorial
-
-    var b = mbox.Builder{};
-    const board_serial = b.add(mbox.get_board_serial, {});
-
-    if (b.exec()) {
-        var hex_fmt = [_]u8{undefined} ** 50;
-        uart.puts("Serial number: ");
-        if (board_serial.get()) |serial| {
-            uart.puts(std.fmt.bufPrint(&hex_fmt, "{x},{x}", .{ serial.serial_0, serial.serial_1 }) catch @panic("too long"));
-            uart.puts("\r\n");
-            for (b.message[0..b.index]) |itm, i| {
-                if (i != 0) uart.puts(", ");
-                uart.puts(std.fmt.bufPrint(&hex_fmt, "{x}", .{itm}) catch @panic("too long"));
-            }
-            uart.puts("\r\n");
-        } else |e| {
-            uart.puts(std.fmt.bufPrint(&hex_fmt, "serial {}\r\n", .{e}) catch @panic("too long"));
-        }
-    } else |e| {
-        uart.puts("Failed to fetch serial!\r\n");
-    }
-    std.log.info("It works! This is the default web page for this web server!", .{});
-
-    framebuffer.init() catch |e| {
-        std.log.err("Framebuffer failed to initialize: {}", .{e});
-        @panic("fb init error");
-    };
-    framebuffer.draw_image();
-
-    hexdump("Testing hexdump. It appears to work, great!");
-
     main() catch |e| {
         std.log.err("Main error: {}", .{e});
         @panic("Main exited with error.");
@@ -803,9 +788,49 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     @panic("Main exited without error.");
 }
 
-pub fn panic(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace) noreturn {
-    std.log.emerg("Panicked! {s}", .{msg});
+pub fn panic(message: []const u8, trace: ?*std.builtin.StackTrace) noreturn {
+    @setCold(true);
+    std.log.emerg("Panicked! {s}", .{message});
+    @import("panic.zig").panicLog(trace);
     @breakpoint();
     while (true) asm volatile ("wfi");
-    // wfi (wait for interrupt) | wfe (wait for event : can be woken up by another core or timer event or something).
 }
+
+// var debug_info_allocator: ?*mem.Allocator = null;
+// var debug_info_arena_allocator: std.heap.ArenaAllocator = undefined;
+// fn getDebugInfoAllocator() *mem.Allocator {
+//     if (debug_info_allocator) |a| return a;
+
+//     debug_info_arena_allocator = std.heap.ArenaAllocator.init(root_allocator);
+//     debug_info_allocator = &debug_info_arena_allocator.allocator;
+//     return &debug_info_arena_allocator.allocator;
+// }
+// // copied from std.debug.dumpStackTrace because it does not let you pass a custom writer
+// pub fn dumpStackTrace(stack_trace: std.builtin.StackTrace, stderr: anytype) void {
+//     if (std.builtin.strip_debug_info) {
+//         stderr.print("Unable to dump stack trace: debug info stripped\n", .{}) catch return;
+//         return;
+//     }
+//     const debug_info = std.debug.getSelfDebugInfo() catch |err| {
+//         stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\n", .{@errorName(err)}) catch return;
+//         return;
+//     };
+//     std.debug.writeStackTrace(stack_trace, stderr, getDebugInfoAllocator(), debug_info, detectTTYConfig()) catch |err| {
+//         stderr.print("Unable to dump stack trace: {s}\n", .{@errorName(err)}) catch return;
+//         return;
+//     };
+// }
+// pub fn dumpCurrentStackTrace(start_addr: ?usize, stderr: anytype) void {
+//     if (std.builtin.strip_debug_info) {
+//         stderr.print("Unable to dump stack trace: debug info stripped\n", .{}) catch return;
+//         return;
+//     }
+//     const debug_info = std.debug.getSelfDebugInfo() catch |err| {
+//         stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\n", .{@errorName(err)}) catch return;
+//         return;
+//     };
+//     std.debug.writeCurrentStackTrace(stderr, debug_info, std.debug.detectTTYConfig(), start_addr) catch |err| {
+//         stderr.print("Unable to dump stack trace: {s}\n", .{@errorName(err)}) catch return;
+//         return;
+//     };
+// }
