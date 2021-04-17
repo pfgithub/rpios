@@ -33,10 +33,13 @@ pub fn build(b: *std.build.Builder) void {
         model.machine,
         "-serial",
         "stdio",
+        "-serial",
+        "file:debug_output.log",
         "-drive",
         "file=src/boot.s,if=sd,format=raw",
         "-kernel",
         b.getInstallPath(exe.install_step.?.dest_dir, exe.out_filename),
+        // -s -S to enable localhost:1234 gdb debugging
     });
     run_cmd.step.dependOn(&exe.install_step.?.step);
     if (b.args) |args| {

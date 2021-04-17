@@ -91,7 +91,7 @@ const mmio = struct {
 const mbox = struct {
     const MBOX_MAX_SIZE = 36;
     const mbox_ptr: *align(0b1000) volatile [MBOX_MAX_SIZE]u32 = &(struct {
-        var mbox_raw: [MBOX_MAX_SIZE]u32 align(0b1000) = [_]u32{undefined} ** MBOX_MAX_SIZE;
+        var mbox_raw: [MBOX_MAX_SIZE]u32 align(0b10000) = [_]u32{undefined} ** MBOX_MAX_SIZE;
     }).mbox_raw;
     const MboxChannel = enum(u4) {
         ch_power = 0,
@@ -170,7 +170,7 @@ const mbox = struct {
 
             for (b.message[0..b.index]) |v, i| mbox_ptr[i] = v;
 
-            if (@ptrToInt(mbox_ptr) & ~@as(usize, 0b111) != @ptrToInt(mbox_ptr)) @panic("misaligned mbox pointer. must be 0b1000 aligned");
+            if (@ptrToInt(mbox_ptr) & ~@as(usize, 0b1111) != @ptrToInt(mbox_ptr)) @panic("misaligned mbox pointer. must be 0b10000 aligned");
             const r = @intCast(u32, @ptrToInt(mbox_ptr)) | @enumToInt(channel);
 
             // wait until we can talk to the VC
@@ -442,7 +442,14 @@ const uart = struct {
                     .rate_hz = 3000000, // 3Mhz
                     .skip_setting_turbo = false, // clear turbo
                 });
-                b.exec() catch @panic("failed to set clock rate");
+                b.exec() catch {
+                    log_location = .uart;
+                    for (b.message[0..b.index]) |value, i| {
+                        std.log.info("msg[{}] = {} (0x{x})", .{ i, value, value });
+                    }
+                    std.log.info("ptr is {*}", .{mbox.mbox_ptr});
+                    @panic("failed to set clock rate");
+                };
             },
         }
 
@@ -738,6 +745,7 @@ fn main() !void {
 
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     uart.init();
+    log_location = .uart;
     uart.puts("Hello, kernel World!\r\n");
 
     // https://github.com/bztsrc/raspi3-tutorial
@@ -762,8 +770,6 @@ export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
     } else |e| {
         uart.puts("Failed to fetch serial!\r\n");
     }
-
-    log_location = .uart;
     std.log.info("It works! This is the default web page for this web server!", .{});
 
     framebuffer.init() catch |e| {
