@@ -33,8 +33,6 @@ pub fn build(b: *std.build.Builder) void {
         model.machine,
         "-serial",
         "stdio",
-        "-serial",
-        "file:debug_output.log",
         "-drive",
         "file=src/boot.s,if=sd,format=raw",
         "-kernel",
