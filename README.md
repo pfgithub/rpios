@@ -3,6 +3,7 @@
 - echfs (follow readsector tutorial)
 - start supporting user level programs
   - load and run a program off the filesystem and handle syscalls
+    - the zig std has an elf parser
   - temporary syscalls for:
     - memory allocation
     - memory deallocation
