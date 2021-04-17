@@ -2,5 +2,6 @@ label: dos
 label-id: 0x41d8cede
 device: binary.img
 unit: sectors
+sector-size: 512
 
 binary.img1 : start=        2048, size=      817152, type=b, bootable
