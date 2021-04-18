@@ -650,6 +650,31 @@ const sd = struct {
     }
 };
 
+const boot_fs = struct {
+    const Partition = struct {
+        lba: u32,
+    };
+    pub fn getPartition(alloc: *std.mem.Allocator) !Partition {
+        const mbr_blocks = try root_allocator.alloc([512]u8, 1);
+        try sd.readblock(0, mbr_blocks);
+        const mbr = mbr_blocks[0];
+
+        // check magic
+        if (mbr[0x1FE] != 0x55 or mbr[0x1FF] != 0xAA) return error.BadMBR;
+
+        // check partition type
+        // - fat16 lba | fat32 lba
+        if (mbr[0x1C2] != 0xE and mbr[0x1C2] != 0xC) return error.BadBootPartition;
+
+        std.log.info("disk identifier: {}\n", .{std.mem.readIntLittle(u32, mbr[0x1B8..][0..4])});
+
+        const partition_lba = std.mem.readIntLittle(u32, mbr[0x1C6..][0..4]);
+        std.log.info("disk starts at {} (0x{X})", .{ partition_lba, partition_lba });
+
+        return Partition{ .lba = partition_lba };
+    }
+};
+
 var log_location: union(enum) {
     discard,
     uart,
@@ -758,6 +783,9 @@ fn main() !void {
     try sd.readblock(0, read_block);
 
     hexdump(@ptrCast([*]const u8, read_block.ptr)[0 .. read_block.len * 512]);
+
+    const root_partition = boot_fs.getPartition(root_allocator);
+    std.log.info("partition: {}", .{root_partition});
 
     while (true) {
         switch (uart.getc()) {
