@@ -2,7 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.debug);
-const log_writer = @import("main.zig").uart.writer();
+const log_writer = @import("uart.zig").writer();
 const c = @import("c.zig");
 
 extern var __debug_info_start: u8;
