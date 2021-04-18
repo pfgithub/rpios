@@ -1,3 +1,13 @@
+# building
+
+install zig, qemu
+
+clone with submodules
+
+`cd src/deps/genimage`, `./autogen.sh`, `./configure`, `make`
+
+`zig build run`
+
 # plan
 
 - echfs (follow readsector tutorial)

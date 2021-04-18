@@ -26,6 +26,9 @@ pub fn build(b: *std.build.Builder) void {
     exe.setLinkerScriptPath("src/linkerscript.ld");
     exe.install();
 
+    const fs_cmd = b.addSystemCommand(&.{ "sh", "tools/genfs.sh" });
+    fs_cmd.step.dependOn(&exe.install_step.?.step);
+
     const qemu_path: []const u8 = b.option([]const u8, "qemu", "qemu-system-aarch64") orelse "qemu-system-aarch64";
     const run_cmd = b.addSystemCommand(&.{
         qemu_path,
@@ -34,12 +37,13 @@ pub fn build(b: *std.build.Builder) void {
         "-serial",
         "stdio",
         "-drive",
-        "file=src/boot.s,if=sd,format=raw",
+        "file=fs/images/sdcard.img,if=sd,format=raw",
         "-kernel",
         b.getInstallPath(exe.install_step.?.dest_dir, exe.out_filename),
         // -s -S to enable localhost:1234 gdb debugging
     });
     run_cmd.step.dependOn(&exe.install_step.?.step);
+    run_cmd.step.dependOn(&fs_cmd.step);
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }

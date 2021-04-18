@@ -1,0 +1,3 @@
+[submodule "src/deps/genimage"]
+	path = src/deps/genimage
+	url = https://github.com/pengutronix/genimage.git

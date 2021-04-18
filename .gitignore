@@ -1,3 +1,4 @@
 zig-cache/
 debug_output.log
-*.img
+fs/images/
+fs/input/boot/kernel8.img
