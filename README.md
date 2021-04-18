@@ -10,6 +10,7 @@ clone with submodules
 
 # plan
 
+- https://github.com/hairymnstr/gristle
 - echfs (follow readsector tutorial)
 - start supporting user level programs
   - load and run a program off the filesystem and handle syscalls
