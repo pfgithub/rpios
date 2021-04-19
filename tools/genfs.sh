@@ -1,3 +1,4 @@
+rm -r fs/images/
 cp zig-cache/bin/kernel8.img fs/input/boot/
 cd fs
     ../src/deps/genimage/genimage
