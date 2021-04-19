@@ -24,6 +24,19 @@
  * https://github.com/bztsrc/raspi3-tutorial/blob/master/05_uart0/start.S
  */
 
+// this assembly file *shouldn't* be necessary, it should be possible to
+// export fn _start() linksection(".text.boot) callconv(.Naked) void {}
+// have that - check cpuid (inline asm to get mpidr_el1).
+//   if ≠ 0, while(true) wfi
+// have that set up a stack and call a function to clear bss
+// after clearing bss, call main
+// this loses the arguments dtb_ptr32: u64, x1: u64, x2: u64, x3: u64
+// it is also more annoying to set the stack because zig expects a slice
+//   while assembly is able to just set the stack end ptr and extern
+//   variables don't have an option to say align(std.Target.stack_align)
+// it also is more annoying to clear the bss because ptr math and extern
+//   variables don't have an option to say align(16)
+
 .section ".text.boot"
 
 .global _start
