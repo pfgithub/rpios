@@ -96,6 +96,21 @@ extern var _end: opaque {};
 var root_allocator_fba: std.heap.FixedBufferAllocator = undefined;
 var root_allocator: *std.mem.Allocator = undefined;
 
+/// bitextract(0bFEDCBA, 2, u3) → CDE
+///
+/// bitextract(value: u{N}, start: Log2Int(u{N}), Size: type(u{N})) Size
+fn bitextract(value: anytype, comptime start: comptime_int, comptime Size: type) Size {
+    comptime const len = std.meta.bitCount(Size);
+    return @intCast(Size, (value >> start) & comptime (0b1 << len) - 1);
+}
+
+test "bitextract" {
+    std.testing.expectEqual(bitextract(0b000011100, 2, u3), 0b111);
+    std.testing.expectEqual(bitextract(0b000011100, 3, u3), 0b011);
+    std.testing.expectEqual(bitextract(0b000011100, 1, u3), 0b110);
+    std.testing.expectEqual(bitextract(0b000011100, 0, u3), 0b100);
+}
+
 fn main() !void {
     uart.init();
     log_location = .uart;
@@ -157,6 +172,24 @@ fn main() !void {
 }
 
 export fn zigMain(dtb_ptr32: u64, x1: u64, x2: u64, x3: u64) noreturn {
+    const current_el = bitextract(asm volatile ("mrs %[ret], CurrentEL"
+        : [ret] "=r" (-> usize)
+    ), 2, u2); // bits[2..4]
+    // bss will be cleared multiple times because it's done before
+    // this code runs. TODO clear bss in zig.
+    switch (current_el) {
+        0b11 => {
+            uart.init();
+            uart.puts("hello! I'm in l3?\n");
+            @panic("oops");
+        },
+        0b10 => {},
+        0b01 => {},
+        0b00 => {},
+    }
+    uart.init();
+    uart.puts("hello! I'm a different level\n");
+
     main() catch |e| {
         std.log.err("Main error: {}", .{e});
         @panic("Main exited with error.");

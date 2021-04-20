@@ -66,11 +66,11 @@ pub fn panicLog(stack_trace: ?*builtin.StackTrace) void {
     }
     already_panicking = true;
 
-    const first_trace_addr = @returnAddress();
-    if (stack_trace) |t| {
-        dumpStackTrace(t);
-    }
-    dumpCurrentStackTrace(first_trace_addr);
+    // const first_trace_addr = @returnAddress();
+    // if (stack_trace) |t| {
+    //     dumpStackTrace(t);
+    // }
+    // dumpCurrentStackTrace(first_trace_addr);
 }
 
 fn panicHalt() noreturn {

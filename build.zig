@@ -40,6 +40,10 @@ pub fn build(b: *std.build.Builder) void {
         "file=fs/images/sdcard.img,if=sd,format=raw",
         "-kernel",
         b.getInstallPath(exe.install_step.?.dest_dir, exe.out_filename),
+        // "-d",
+        // "int",
+        // "-s",
+        // "-S",
         // -s -S to enable localhost:1234 gdb debugging
     });
     run_cmd.step.dependOn(&exe.install_step.?.step);
