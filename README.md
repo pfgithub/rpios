@@ -32,3 +32,12 @@ clone with submodules
       - reading and writing files
       - registering services
       - spawning programs with access to a specified list of services
+
+plan:
+
+![image](.github/img/img-2021-04-20-10-53-33.png)
+
+do both of those things:
+
+- imgui system interface (not dear imgui, instead the same imgui I'm using in threadimgui)
+- os-level libraries (like dynamic linking but better)
