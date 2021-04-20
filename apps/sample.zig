@@ -1,4 +1,4 @@
-//! zig build-exe sample.zig -target aarch64-freestanding -fPIC -fPIE -mcpu cortex_a53-neon -ofmt=elf
+//! zig build-exe sample.zig -target aarch64-freestanding -fPIC -fPIE -mcpu cortex_a53 -ofmt=elf
 
 const std = @import("std");
 

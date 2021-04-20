@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     const exe = b.addExecutable("kernel8.img", "src/main.zig");
 
     const model: Model = .{
-        .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53-neon" }) catch unreachable,
+        .target = std.zig.CrossTarget.parse(.{ .arch_os_abi = "aarch64-freestanding", .cpu_features = "cortex_a53" }) catch unreachable,
         .machine = "raspi3",
     };
 
