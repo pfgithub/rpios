@@ -133,6 +133,61 @@ fn callUserCode() void {
     std.log.info("not implemented", .{});
 }
 
+pub const page_table = struct {
+    const PageTable = struct {
+        // tree of ranges with flags set on them
+        // ranges cannot overlap
+        // sorted so when you insert one it's easy
+        // you can then take this and write it to memory
+        // and set the page table to that location in memory
+
+        // sample:
+        //   pageTable.addRange(start, slice, execute);
+        //   pageTable.addRange(start, slice, read/write);
+        // so eg
+        //   const program_text_section: []align(4096) u8 = …;
+        //   pageTable.addRange(0x8000, program_text_section, execute);
+        //   const ptmem = try pageTable.write(alloc);
+        //   eret(ptmem, 0x8000)
+        // like that
+
+        // wow that's really nice actually
+        // []align(4096) u8
+
+        // also, data gotten back in the syscalls the program makes can have their addresses
+        // translated through the page table or something
+        // unfortunately, have to make wrapper types for these because the required zig feature
+        // for built-in support is not implemented. + I have forgotten what that feature is.
+    };
+
+    const PAGE_SIZE = 4096;
+
+    const PageFlags = packed struct {};
+
+    const PAGE = 0b11; // 4k (4096)
+    const BLOCK = 0b01; // 2M ()
+    const KERNEL = 0 << 6; // el1 access only
+    const USER = 1 << 6; // el0 access allowed
+    const RW = 0 << 7; // read-write access
+    const RO = 1 << 7; // readonly
+
+    pub fn initKernel(alloc: *std.mem.Allocator) void {
+        // how to test: try writing to a ptrcasted function and see if it memory perm errors
+        // alternatively: try jumping to a data section and see if it memory perm errors
+
+        // information about this is in the armv8 pdf in D5.3 I think
+        const pt = alloc;
+        // init and fill with 0
+
+        // lower half, user space
+        // asm volatile ("msr ttbr0_el1, %0" : : "r" ((unsigned long)&_end + TTBR_CNP));
+        // // upper half, kernel space
+        // asm volatile ("msr ttbr1_el1, %0" : : "r" ((unsigned long)&_end + TTBR_CNP + PAGESIZE));
+
+        // so do we have to set ttbr0_el1 currently? or set that before calling an el0 function?
+    }
+};
+
 fn main() !void {
     uart.init();
     log_location = .uart;
@@ -162,6 +217,8 @@ fn main() !void {
         };
         root_allocator = &root_allocator_fba.allocator;
     }
+
+    try page_table.initKernel(root_allocator);
 
     try sd.init();
     const read_block = try root_allocator.alloc([512]u8, 1);

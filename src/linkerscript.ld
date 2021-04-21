@@ -28,6 +28,8 @@ SECTIONS
 {
     . = 0x80000;
     .text : { KEEP(*(.text.boot)) *(.text .text.* .gnu.linkonce.t*) }
+    . = ALIGN(4096); // for page table
+    _rodata = .;
     .rodata : {
         *(.rodata .rodata.* .gnu.linkonce.r*)
         //__debug_info_start = .;
@@ -46,7 +48,8 @@ SECTIONS
         //KEEP(*(.debug_ranges))
         //__debug_ranges_end = .;
     }
-    PROVIDE(_data = .);
+    . = ALIGN(4096); // for page table
+    _data = .;
     .data : { *(.data .data.* .gnu.linkonce.d*) }
     .bss (NOLOAD) : {
         . = ALIGN(16);
@@ -55,7 +58,7 @@ SECTIONS
         *(COMMON)
         __bss_end = .;
     }
-    . = ALIGN(8);
+    . = ALIGN(4096);
     _end = .;
 
    /DISCARD/ : { *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) }
