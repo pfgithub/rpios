@@ -2,7 +2,7 @@
 
 const std = @import("std");
 
-export fn syscall0(number: usize) usize {
+fn syscall0(number: usize) usize {
     return asm volatile ("svc #0"
         : [ret] "={x0}" (-> usize)
         : [number] "{x8}" (number)

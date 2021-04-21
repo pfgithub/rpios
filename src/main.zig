@@ -111,6 +111,28 @@ test "bitextract" {
     std.testing.expectEqual(bitextract(0b000011100, 0, u3), 0b100);
 }
 
+fn userCode() noreturn {
+    for ("Hello, World!") |char| _ = asm volatile ("svc #0"
+        : [ret] "={x0}" (-> usize)
+        : [number] "{x8}" (0),
+          [arg1] "{x0}" (char)
+        : "memory", "cc"
+    );
+    _ = asm volatile ("svc #0"
+        : [ret] "={x0}" (-> usize)
+        : [number] "{x8}" (1)
+    );
+    unreachable;
+}
+
+fn callUserCode() void {
+    // set up page table
+    // also stack I guess for now
+    // eret to el0 (&userCode)
+    // on exception: switch(exception)
+    std.log.info("not implemented", .{});
+}
+
 fn main() !void {
     uart.init();
     log_location = .uart;
@@ -152,7 +174,7 @@ fn main() !void {
 
     while (true) {
         switch (uart.getc()) {
-            'h' => uart.puts("Help menu:\n- [h]elp\n- [r]estart\n- [s]hutdown\n- [p]anic\n"),
+            'h' => uart.puts("Help menu:\n- [h]elp\n- [r]estart\n- [s]hutdown\n- [p]anic\n- [u]ser code\n"),
             's' => {
                 std.log.info("Shutting down…", .{});
                 power.power_off();
@@ -165,6 +187,9 @@ fn main() !void {
             },
             'p' => {
                 @panic("crash");
+            },
+            'u' => {
+                callUserCode();
             },
             else => |c| uart.putc(c),
         }
